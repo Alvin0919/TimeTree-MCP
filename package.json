@@ -1,0 +1,29 @@
+{
+  "name": "timetree-mcp",
+  "version": "0.1.0",
+  "description": "Personal-use unofficial TimeTree MCP for Claude Code. Reads event posters and writes events into shared TimeTree calendars.",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "timetree-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsx --watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
