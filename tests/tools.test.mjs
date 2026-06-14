@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { registerTools } from '../.test-dist/tools/index.js';
 import { createCreateEventTool, createUpdateEventTool } from '../.test-dist/tools/event-crud-tools.js';
 import { createCreateMemoTool } from '../.test-dist/tools/memo-tools.js';
+import { createPosterWorkspaceStatusTool } from '../.test-dist/tools/poster-workflow-tools.js';
 
 function makeEvent(overrides = {}) {
   return {
@@ -49,6 +53,8 @@ test('registerTools exposes baseline plus Wave 1 tools', () => {
     'list_calendars',
     'list_event_comments',
     'list_memos',
+    'mark_poster_processed',
+    'poster_workspace_status',
     'update_calendar_labels',
     'update_event',
     'update_event_comment',
@@ -96,6 +102,56 @@ test('create_event passes alerts, recurrences, attendees, files, and virtual att
   assert.deepEqual(captured.data.file_uuids, ['file-1']);
   assert.deepEqual(captured.data.attachment.virtual_user_attendees, ['virtual-1']);
   assert.equal(parseToolText(result).event.virtual_user_attendees[0], 'virtual-1');
+});
+
+test('poster_workspace_status moves loose images into pending', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetree-posters-'));
+  const looseImage = join(root, 'poster.jpg');
+  await writeFile(looseImage, 'fake image');
+
+  const tool = createPosterWorkspaceStatusTool();
+  const result = await tool.handler({ root });
+  const body = parseToolText(result);
+
+  assert.equal(body.counts.pending, 1);
+  assert.equal(body.moved_loose_images.length, 1);
+  assert.equal(body.pending[0].name, 'poster.jpg');
+});
+
+test('create_event marks pending poster as created and writes log', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'timetree-posters-'));
+  const pending = join(root, '00_pending');
+  await mkdir(pending, { recursive: true });
+  const imagePath = join(pending, 'poster.png');
+  await writeFile(imagePath, 'fake image');
+
+  const tool = createCreateEventTool({
+    createEvent: async (calendarId, data) => makeEvent({
+      uuid: 'created',
+      calendar_id: Number(calendarId),
+      title: data.title,
+      start_at: data.start_at,
+      end_at: data.end_at,
+      url: 'https://example.test/event',
+    }),
+  });
+
+  const result = await tool.handler({
+    calendar_id: 123,
+    title: 'poster event',
+    start_at: 1000,
+    end_at: 2000,
+    image_path: imagePath,
+    poster_workspace_root: root,
+  });
+  const body = parseToolText(result);
+
+  assert.equal(body.poster_workflow.moved, true);
+  assert.match(body.poster_workflow.to, /10_created/);
+
+  const log = await readFile(body.poster_workflow.log_path, 'utf8');
+  assert.match(log, /poster event/);
+  assert.match(log, /created/);
 });
 
 test('update_event passes partial scheduling and attachment fields through', async () => {

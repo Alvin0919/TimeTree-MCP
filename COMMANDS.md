@@ -24,6 +24,8 @@ Quick reference for using TimeTree MCP Server with AI assistants.
 | **update_calendar_labels** | Merge-update calendar label names/colors |
 | **get_calendar_members** | Get calendar members |
 | **get_calendar_virtual_members** | Get virtual members |
+| **poster_workspace_status** | Prepare and inspect a local poster workflow folder |
+| **mark_poster_processed** | Move a processed poster image and append the CSV log |
 
 ## Tool Details
 
@@ -95,6 +97,8 @@ Creates a new event in a calendar.
 | `alerts` | No | Notification offsets in minutes, e.g. `[5, 30]` |
 | `recurrences` | No | RRULE strings, e.g. `["RRULE:FREQ=DAILY;COUNT=2"]` |
 | `file_uuids` | No | Attached file UUIDs if already uploaded |
+| `image_path` | No | Local poster image path to move/log after successful creation; does not upload the image |
+| `poster_workspace_root` | No | Poster workflow root used with `image_path`; defaults to env/default path |
 | `checklist` | No | Array of `{title, checked}` items |
 | `virtual_user_attendees` | No | Virtual member IDs/names |
 
@@ -126,6 +130,8 @@ Updates an existing event. Only provide fields you want to change.
 | `alerts` | No | Replace notification offsets in minutes; use `[]` to clear |
 | `recurrences` | No | Replace RRULE strings |
 | `file_uuids` | No | Replace attached file UUIDs |
+| `image_path` | No | Local poster image path to move/log after successful update; does not upload the image |
+| `poster_workspace_root` | No | Poster workflow root used with `image_path`; defaults to env/default path |
 | `checklist` | No | Replace checklist items (use `[]` to clear) |
 | `virtual_user_attendees` | No | Replace virtual member attendees; use `[]` to clear |
 
@@ -194,6 +200,29 @@ Manage comments using TimeTree event activity endpoints.
 
 ---
 
+### poster workflow tools
+
+These tools manage local poster images on disk. They do not upload images to TimeTree.
+
+| Tool | Key parameters |
+|------|----------------|
+| `poster_workspace_status` | optional `root`, `move_loose_images_to_pending` |
+| `mark_poster_processed` | `image_path`, `status`, optional event metadata, optional `root` |
+
+Folder layout:
+
+| Folder | Purpose |
+|--------|---------|
+| `00_pending` | Posters waiting to be processed |
+| `10_created` | Posters for newly created events |
+| `20_updated_existing_event` | Posters used to update existing events |
+| `90_needs_manual_review` | Posters that need manual confirmation |
+| `_log` | Daily CSV processing logs |
+
+If `TIMETREE_POSTER_WORKSPACE_ROOT` is not set, the default root is `~/Desktop/timetree-posters`.
+
+---
+
 ## Label Colors
 
 Events can be color-coded with `label_id` 1-10:
@@ -238,3 +267,4 @@ Events can be color-coded with `label_id` 1-10:
 - **All-day events**: TimeTree uses inclusive end dates. A Feb 15-16 event sets `end_at` to Feb 16 00:00, not Feb 17.
 - **Timezones**: Default is UTC. Specify timezone for accurate local times.
 - **Write operations** (create/update/delete) require a CSRF token, which is managed automatically.
+- **Poster workflow**: `image_path` only moves/logs local files after a successful write. Use `file_uuids` for already uploaded TimeTree attachments.

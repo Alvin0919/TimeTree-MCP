@@ -9,6 +9,7 @@ import { InvalidCalendarError, TimeTreeAPIError } from '../client/api.js';
 import { logger } from '../utils/logger.js';
 import { getLabelColorName } from '../types/label-colors.js';
 import type { ChecklistItem, Event } from '../types/timetree.js';
+import { markPosterProcessed } from './poster-workflow-tools.js';
 
 const ChecklistSchema = z.array(z.object({
   checked: z.boolean().default(false).describe('Whether the checklist item is checked'),
@@ -131,6 +132,8 @@ export const CreateEventInputSchema = z.object({
   recurrences: z.array(z.string()).optional().describe('RRULE strings, e.g. ["RRULE:FREQ=DAILY;COUNT=2"]'),
   alerts: z.array(z.number()).optional().describe('Notification offsets in minutes, e.g. [5, 30]'),
   file_uuids: z.array(z.string()).optional().describe('Attached file UUIDs if already uploaded'),
+  image_path: z.string().optional().describe('Local poster image path to move/log after the event is created; this does not upload the image to TimeTree.'),
+  poster_workspace_root: z.string().optional().describe('Optional poster workflow root used with image_path. Defaults to TIMETREE_POSTER_WORKSPACE_ROOT or ~/Desktop/timetree-posters.'),
   checklist: ChecklistSchema.optional().describe('Checklist items to attach to the event'),
   virtual_user_attendees: VirtualUserAttendeesSchema.optional().describe('Virtual member IDs/names attending this event'),
 });
@@ -197,6 +200,14 @@ export function createCreateEventTool(apiClient: TimeTreeAPIClient) {
           description: 'Attached file UUIDs if already uploaded',
           items: { type: 'string' },
         },
+        image_path: {
+          type: 'string',
+          description: 'Local poster image path to move/log after successful creation. This does not upload the image to TimeTree.',
+        },
+        poster_workspace_root: {
+          type: 'string',
+          description: 'Optional poster workflow root used with image_path. Defaults to TIMETREE_POSTER_WORKSPACE_ROOT or ~/Desktop/timetree-posters.',
+        },
         checklist: {
           type: 'array',
           description: 'Checklist items to attach to the event',
@@ -243,6 +254,20 @@ export function createCreateEventTool(apiClient: TimeTreeAPIClient) {
 
         logger.info('Tool: create_event completed', { uuid: event.uuid });
 
+        const poster_workflow = input.image_path
+          ? await markPosterProcessed({
+              image_path: input.image_path,
+              status: 'created',
+              event_id: event.uuid,
+              event_url: event.url || undefined,
+              title: input.title,
+              event_date: new Date(input.start_at).toISOString().slice(0, 10),
+              start: new Date(input.start_at).toISOString(),
+              end: new Date(input.end_at).toISOString(),
+              root: input.poster_workspace_root,
+            })
+          : null;
+
         return {
           content: [
             {
@@ -252,6 +277,7 @@ export function createCreateEventTool(apiClient: TimeTreeAPIClient) {
                   success: true,
                   message: 'Event created successfully',
                   event: formatEvent(event),
+                  ...(poster_workflow && { poster_workflow }),
                 },
                 null,
                 2
@@ -289,6 +315,8 @@ export const UpdateEventInputSchema = z.object({
   recurrences: z.array(z.string()).optional().describe('Replace recurrence RRULE strings'),
   alerts: z.array(z.number()).optional().describe('Replace notification offsets in minutes'),
   file_uuids: z.array(z.string()).optional().describe('Replace attached file UUIDs'),
+  image_path: z.string().optional().describe('Local poster image path to move/log after the event is updated; this does not upload the image to TimeTree.'),
+  poster_workspace_root: z.string().optional().describe('Optional poster workflow root used with image_path. Defaults to TIMETREE_POSTER_WORKSPACE_ROOT or ~/Desktop/timetree-posters.'),
   checklist: ChecklistSchema.optional().describe('Replace event checklist items; use [] to clear checklist'),
   virtual_user_attendees: VirtualUserAttendeesSchema.optional().describe('Replace virtual member attendees; use [] to clear'),
 });
@@ -335,6 +363,14 @@ export function createUpdateEventTool(apiClient: TimeTreeAPIClient) {
           type: 'array',
           description: 'Replace attached file UUIDs',
           items: { type: 'string' },
+        },
+        image_path: {
+          type: 'string',
+          description: 'Local poster image path to move/log after successful update. This does not upload the image to TimeTree.',
+        },
+        poster_workspace_root: {
+          type: 'string',
+          description: 'Optional poster workflow root used with image_path. Defaults to TIMETREE_POSTER_WORKSPACE_ROOT or ~/Desktop/timetree-posters.',
         },
         checklist: {
           type: 'array',
@@ -389,6 +425,20 @@ export function createUpdateEventTool(apiClient: TimeTreeAPIClient) {
 
         logger.info('Tool: update_event completed', { uuid: event.uuid });
 
+        const poster_workflow = input.image_path
+          ? await markPosterProcessed({
+              image_path: input.image_path,
+              status: 'updated',
+              event_id: event.uuid,
+              event_url: event.url || undefined,
+              title: input.title,
+              event_date: input.start_at ? new Date(input.start_at).toISOString().slice(0, 10) : undefined,
+              start: input.start_at ? new Date(input.start_at).toISOString() : undefined,
+              end: input.end_at ? new Date(input.end_at).toISOString() : undefined,
+              root: input.poster_workspace_root,
+            })
+          : null;
+
         return {
           content: [
             {
@@ -398,6 +448,7 @@ export function createUpdateEventTool(apiClient: TimeTreeAPIClient) {
                   success: true,
                   message: 'Event updated successfully',
                   event: formatEvent(event),
+                  ...(poster_workflow && { poster_workflow }),
                 },
                 null,
                 2

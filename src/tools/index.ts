@@ -29,6 +29,10 @@ import {
   createListMemosTool,
   createUpdateMemoTool,
 } from './memo-tools.js';
+import {
+  createMarkPosterProcessedTool,
+  createPosterWorkspaceStatusTool,
+} from './poster-workflow-tools.js';
 
 export function registerTools(apiClient: TimeTreeAPIClient) {
   return [
@@ -50,5 +54,7 @@ export function registerTools(apiClient: TimeTreeAPIClient) {
     createUpdateCalendarLabelsTool(apiClient),
     createGetCalendarMembersTool(apiClient),
     createGetCalendarVirtualMembersTool(apiClient),
+    createPosterWorkspaceStatusTool(),
+    createMarkPosterProcessedTool(),
   ];
 }

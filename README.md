@@ -20,6 +20,7 @@ An unofficial MCP (Model Context Protocol) server that allows MCP clients (Claud
 - 🗒️ **Manage Memos** - List, create, update, and delete TimeTree memos
 - 💬 **Manage Comments** - Add, list, update, and delete event comments
 - 🏷️ **Calendar Metadata** - Read/update labels and inspect members/virtual members
+- **Poster Workflow** - Organize local event poster images after creating/updating events
 - 🔐 **Secure Authentication** - Email/password authentication (stored only in MCP config)
 - ⚡ **Rate Limiting** - Token bucket algorithm to prevent API overload
 - 🔄 **Auto Pagination** - Automatically fetches all events across multiple pages
@@ -129,6 +130,9 @@ Then restart your MCP client.
 - **add_event_comment / list_event_comments / update_event_comment / delete_event_comment** - Manage event comments
 - **get_calendar_labels / update_calendar_labels** - Read or merge-update calendar labels
 - **get_calendar_members / get_calendar_virtual_members** - Read calendar member metadata
+- **poster_workspace_status / mark_poster_processed** - Manage a local poster-processing folder and CSV log
+
+`create_event` and `update_event` can also accept `image_path` plus optional `poster_workspace_root` to move a processed poster and write the CSV log after the TimeTree write succeeds. This workflow does not upload the image to TimeTree.
 
 📖 See [COMMANDS.md](COMMANDS.md) for parameters and usage details.
 
@@ -161,6 +165,10 @@ npm run dev
 #### "Missing required environment variables" error
 
 Make sure `TIMETREE_EMAIL` and `TIMETREE_PASSWORD` are set in your MCP configuration.
+
+#### Poster workflow folder
+
+Set `TIMETREE_POSTER_WORKSPACE_ROOT` if you want poster workflow tools to use a specific folder. If omitted, the default is `~/Desktop/timetree-posters`.
 
 #### Authentication fails
 
