@@ -63,6 +63,19 @@ export const CreateEventResponseSchema = z.object({
 export type TimeTreeCalendar = z.infer<typeof TimeTreeCalendarSchema>;
 export type TimeTreeEvent = z.infer<typeof TimeTreeEventSchema>;
 
+export const EventsSyncResponseSchema = z.object({
+  events: z.array(TimeTreeEventSchema),
+  chunk: z.boolean().optional(),
+  since: z.number().optional(),
+}).passthrough();
+
+export type PrivateEventBody = Record<string, unknown> & {
+  title: string;
+  all_day: boolean;
+  start_at: number;
+  end_at: number;
+};
+
 // ============================================================================
 // Public calendar API (OpenAPI v2) — what TimeTree's own web app actually
 // uses now. Anonymous read, no session cookie required, but the

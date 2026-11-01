@@ -19,6 +19,8 @@ import { randomUUID } from 'node:crypto';
 import {
   AttachmentsResponseSchema,
   CalendarsResponseSchema,
+  CreateEventResponseSchema,
+  EventsSyncResponseSchema,
   CreatePublicEventResponseSchema,
   PublicCalendarResponseSchema,
   PublicEventsResponseSchema,
@@ -28,6 +30,8 @@ import {
   type PublicCalendar,
   type PublicEvent,
   type TimeTreeCalendar,
+  type TimeTreeEvent,
+  type PrivateEventBody,
 } from './types.js';
 
 // ============================================================================
@@ -137,6 +141,10 @@ class HttpClient {
   private csrfToken?: string;
 
   setCsrf(token: string): void { this.csrfToken = token; }
+  setSession(cookie: string): void {
+    if (!cookie || /[\s;,\x00-\x1f\x7f]/.test(cookie)) throw new AuthError('Invalid session cookie format');
+    this.sessionCookie = cookie;
+  }
   hasSession(): boolean { return !!this.sessionCookie; }
   hasCsrf(): boolean { return !!this.csrfToken; }
   clearAuth(): void { this.sessionCookie = undefined; this.csrfToken = undefined; }
@@ -204,6 +212,8 @@ class HttpClient {
 export interface TimeTreeClientConfig {
   email: string;
   password: string;
+  calendarId?: string;
+  sessionCookie?: string;
 }
 
 export class TimeTreeClient {
@@ -215,25 +225,31 @@ export class TimeTreeClient {
   private async ensureAuth(): Promise<void> {
     if (this.authenticated && this.http.hasSession() && this.http.hasCsrf()) return;
 
-    logger.info('Authenticating with TimeTree');
-
-    // Step 1: signin → session cookie.
-    // TimeTree expects uuid to be a hex string without hyphens.
-    const uuid = randomUUID().replace(/-/g, '');
-    try {
-      await this.http.request(`${BASE_URL}/auth/email/signin`, {
-        method: 'PUT',
-        body: { uid: this.config.email, password: this.config.password, uuid },
-      });
-    } catch (e) {
-      const code = (e as TimeTreeError).statusCode;
-      if (code === 401) throw new AuthError('Invalid email or password', 401);
-      if (code === 403) throw new AuthError('Account access forbidden', 403);
-      throw new AuthError(`Auth failed: ${(e as Error).message}`);
-    }
-
+    // A locally supplied web session supports Google/Apple sign-in without their passwords.
+    if (!this.http.hasSession() && this.config.sessionCookie) this.http.setSession(this.config.sessionCookie);
     if (!this.http.hasSession()) {
-      throw new AuthError('No session cookie returned from signin');
+      if (!this.config.email || !this.config.password) throw new AuthError('Set TIMETREE_SESSION_COOKIE or TIMETREE_EMAIL and TIMETREE_PASSWORD');
+
+      logger.info('Authenticating with TimeTree');
+
+      // Step 1: signin → session cookie.
+      // TimeTree expects uuid to be a hex string without hyphens.
+      const uuid = randomUUID().replace(/-/g, '');
+      try {
+        await this.http.request(`${BASE_URL}/auth/email/signin`, {
+          method: 'PUT',
+          body: { uid: this.config.email, password: this.config.password, uuid },
+        });
+      } catch (e) {
+        const code = (e as TimeTreeError).statusCode;
+        if (code === 401) throw new AuthError('Invalid email or password', 401);
+        if (code === 403) throw new AuthError('Account access forbidden', 403);
+        throw new AuthError(`Auth failed: ${(e as Error).message}`);
+      }
+
+      if (!this.http.hasSession()) {
+        throw new AuthError('No session cookie returned from signin');
+      }
     }
 
     // Step 2: fetch the web root HTML to scrape the CSRF token meta tag.
@@ -254,6 +270,67 @@ export class TimeTreeClient {
     const raw = await this.http.request<unknown>(`${BASE_URL}/calendars?since=0`);
     const parsed = CalendarsResponseSchema.parse(raw);
     return parsed.calendars.filter((c) => !c.deactivated_at);
+  }
+
+  get calendarId(): string {
+    const id = this.config.calendarId?.trim();
+    if (!id || !/^[1-9]\d*$/.test(id) || !Number.isSafeInteger(Number(id))) {
+      throw new TimeTreeError('Set TIMETREE_CALENDAR_ID to the ID of 共用行事曆 returned by list_calendars');
+    }
+    return id;
+  }
+
+  private checkEventTarget(event: TimeTreeEvent): TimeTreeEvent {
+    if (String(event.calendar_id) !== this.calendarId) throw new TimeTreeError('Event belongs to another calendar');
+    return event;
+  }
+
+  async listEvents(): Promise<TimeTreeEvent[]> {
+    const id = this.calendarId;
+    await this.ensureAuth();
+    const events = new Map<string, TimeTreeEvent>();
+    const seen = new Set<number>([0]);
+    let cursor = 0;
+    for (let page = 0; page < 1000; page++) {
+      const raw = await this.http.request<unknown>(`${BASE_URL}/calendar/${id}/events/sync?since=${cursor}`);
+      const data = EventsSyncResponseSchema.parse(raw);
+      for (const event of data.events) {
+        this.checkEventTarget(event);
+        const previous = events.get(event.uuid);
+        if (!previous || (event.updated_at ?? 0) >= (previous.updated_at ?? 0)) events.set(event.uuid, event);
+      }
+      if (!data.chunk) return [...events.values()].filter((e) => !e.deactivated_at);
+      if (data.since === undefined || seen.has(data.since)) throw new TimeTreeError('Incomplete event sync: repeated or missing cursor');
+      seen.add(data.since);
+      cursor = data.since;
+    }
+    throw new TimeTreeError('Incomplete event sync: page limit reached');
+  }
+
+  async getEvent(uuid: string): Promise<TimeTreeEvent> {
+    const id = this.calendarId;
+    if (!/^[A-Za-z0-9_-]+$/.test(uuid)) throw new TimeTreeError('Invalid event UUID');
+    await this.ensureAuth();
+    const raw = await this.http.request<unknown>(`${BASE_URL}/calendar/${id}/event/${encodeURIComponent(uuid)}`);
+    return this.checkEventTarget(CreateEventResponseSchema.parse(raw).event);
+  }
+
+  async createEvent(body: PrivateEventBody): Promise<TimeTreeEvent> {
+    return this.writePrivateEvent('POST', '', body);
+  }
+
+  async updateEvent(uuid: string, body: PrivateEventBody): Promise<TimeTreeEvent> {
+    if (!/^[A-Za-z0-9_-]+$/.test(uuid)) throw new TimeTreeError('Invalid event UUID');
+    return this.writePrivateEvent('PUT', `/${encodeURIComponent(uuid)}`, body);
+  }
+
+  private async writePrivateEvent(method: 'POST' | 'PUT', suffix: string, body: PrivateEventBody): Promise<TimeTreeEvent> {
+    const id = this.calendarId;
+    if (body.calendar_id !== undefined && String(body.calendar_id) !== id) throw new TimeTreeError('Cannot write to another calendar');
+    await this.ensureAuth();
+    if (!this.http.hasCsrf()) throw new AuthError('CSRF token missing; write not sent');
+    const raw = await this.http.request<unknown>(`${BASE_URL}/calendar/${id}/event${suffix}`, { method, body, requireCsrf: true });
+    return this.checkEventTarget(CreateEventResponseSchema.parse(raw).event);
   }
 
   /**

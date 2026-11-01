@@ -1,7 +1,7 @@
 {
   "name": "timetree-mcp",
   "version": "0.1.0",
-  "description": "Personal-use unofficial TimeTree MCP for Claude Code. Reads event posters and writes events into shared TimeTree calendars.",
+  "description": "Personal-use unofficial TimeTree MCP restricted to one configured private calendar.",
   "private": true,
   "type": "module",
   "main": "dist/index.js",

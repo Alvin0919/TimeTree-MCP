@@ -2,10 +2,12 @@
 /**
  * TimeTree MCP server entry.
  *
- * Reads TIMETREE_EMAIL / TIMETREE_PASSWORD from env, connects to TimeTree's
- * (unofficial) internal web API, and exposes two tools over MCP stdio:
+ * Reads a local session cookie or email/password from env, connects to TimeTree's
+ * (unofficial) internal web API, and exposes four tools over MCP stdio:
  *   - list_calendars
  *   - create_event
+ *   - list_events
+ *   - update_event
  *
  * DISCLAIMER: This MCP uses reverse-engineered endpoints. TimeTree's official
  * API was shut down on 2023-12-22. The internal endpoints may change at any
@@ -22,7 +24,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { PublicTimeTreeClient, TimeTreeClient, logger } from './timetree.js';
+import { TimeTreeClient, logger } from './timetree.js';
 import { buildTools } from './tools.js';
 
 const VERSION = '0.1.0';
@@ -66,30 +68,17 @@ function loadEnvFile(): void {
 
 loadEnvFile();
 
-function requireEnv(name: string): string {
-  const v = process.env[name];
-  if (!v) {
-    console.error(`[timetree-mcp] Missing required env var: ${name}`);
-    console.error('[timetree-mcp] Set TIMETREE_EMAIL and TIMETREE_PASSWORD in your MCP config.');
-    console.error('[timetree-mcp] See .env.example for the format.');
-    process.exit(1);
-  }
-  return v;
-}
-
 async function main(): Promise<void> {
-  // Read tools (list_calendars, list_events) use the public OpenAPI and don't
-  // need credentials. Auth is only required for create_event, so degrade
-  // gracefully if .env is missing — read tools still work.
+  // All tools require the account session; discovery works without a pinned ID.
   const email = process.env.TIMETREE_EMAIL || '';
   const password = process.env.TIMETREE_PASSWORD || '';
-  if (!email || !password) {
-    logger.warn('TIMETREE_EMAIL / TIMETREE_PASSWORD not set — create_event will fail, read tools still work');
+  const sessionCookie = process.env.TIMETREE_SESSION_COOKIE || '';
+  if (!sessionCookie && (!email || !password)) {
+    logger.warn('Set TIMETREE_SESSION_COOKIE or TIMETREE_EMAIL / TIMETREE_PASSWORD to use calendar tools');
   }
 
-  const client = new TimeTreeClient({ email, password });
-  const publicClient = new PublicTimeTreeClient();
-  const tools = buildTools(client, publicClient);
+  const client = new TimeTreeClient({ email, password, sessionCookie, calendarId: process.env.TIMETREE_CALENDAR_ID });
+  const tools = buildTools(client);
 
   const server = new Server(
     { name: 'timetree-mcp', version: VERSION },

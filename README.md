@@ -1,167 +1,82 @@
 # timetree-mcp
 
-A personal-use MCP server that lets Claude write events into your shared TimeTree calendar.
-Typical flow: paste an event poster → Claude extracts date / location / title and writes a
-short description → calls `create_event` → event shows up in the TimeTree app.
+個人使用的非官方 TimeTree MCP，專門讀取、新增及更新自己帳號中的非公開「共用行事曆」。日曆仍由 TimeTree 既有成員共用，MCP 不會把它轉成公開日曆。
 
-## ⚠️ Disclaimer (read before using)
+TimeTree 已於 [2023-12-22 停止官方 Connect API](https://timetreeapp.com/intl/en/newsroom/2023-12-14/connect-app-api-202312)。本專案使用非官方 web API，可能隨服務變動失效，沒有官方支援。Endpoint 與事件格式參考 [ehs208/TimeTree-MCP](https://github.com/ehs208/TimeTree-MCP)（MIT），並未匯入其程式。請自行確認服務使用條款。
 
-- TimeTree's **official Connect API was shut down on 2023-12-22**. This MCP talks to
-  TimeTree's *internal* web API (the same one the web app uses), reverse-engineered.
-- This is **unofficial and not affiliated with TimeTree, Inc.** It may break at any time
-  if TimeTree changes the internal API. Using it may **violate TimeTree's Terms of Service**.
-- **Use a dedicated TimeTree account**, not your main one. Invite that account to the
-  shared calendar(s) you want to manage. If TimeTree flags the account, only the dedicated
-  one is at risk.
-- **Personal use only.** Don't publish this, don't run it at scale, don't make commercial
-  use of it.
+## 安裝與設定
 
-Endpoint mapping informed by [ehs208/TimeTree-MCP](https://github.com/ehs208/TimeTree-MCP) (MIT)
-and [eoleedi/TimeTree-Exporter](https://github.com/eoleedi/TimeTree-Exporter).
-
-## Install
-
-Requires Node.js 18+.
+需要 Node.js 18+。在本專案目錄執行：
 
 ```powershell
-cd C:\Users\user\Desktop\timetree-mcp
 npm install
 npm run build
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-## Configure
+使用 email 登入時，在本機 `.env` 填入 `TIMETREE_EMAIL` 與 `TIMETREE_PASSWORD`。Google/Apple 登入請使用下方的本機 session 匯入。不要把密碼或 session 貼到對話、命令列或同步筆記；`.env` 已被 git 忽略。
 
-Copy `.env.example` to `.env` and fill in your dedicated account:
+### Google 登入的本機 session 匯入
 
-```
-TIMETREE_EMAIL=dedicated-bot@example.com
-TIMETREE_PASSWORD=...
-LOG_LEVEL=INFO
-```
-
-The server reads `.env` from the project root at startup, so you do NOT need
-to pass credentials on the `claude mcp add` command line (that would put them
-in PowerShell history). Just register the binary:
+本程式不代替 Google 登入，也不讀取 Chrome cookie 資料庫。先在 Chrome 登入 TimeTree，開啟 DevTools → Application → Cookies → https://timetreeapp.com，找到 `_session_id`，只複製 Value 欄位，然後在本專案目錄的 PowerShell 執行：
 
 ```powershell
-claude mcp add timetree node "C:\Users\user\Desktop\timetree-mcp\dist\index.js"
+& .\scripts\Import-TimeTreeSession.ps1
 ```
 
-Or, if you prefer editing config directly (e.g. `~/.claude/settings.json`):
+腳本只把剪貼簿中的值寫入 gitignored `.env` 的 `TIMETREE_SESSION_COOKIE`，保留其他設定，不印出值，完成後清空剪貼簿；含換行、空白或 Cookie header 的輸入會拒絕。Session 等同帳號憑證，不要貼到聊天。若 PowerShell 不允許執行腳本，可以直接在本機編輯 `.env`，同樣不要將值輸出或分享。
 
-```json
-{
-  "mcpServers": {
-    "timetree": {
-      "command": "node",
-      "args": ["C:\\Users\\user\\Desktop\\timetree-mcp\\dist\\index.js"]
-    }
-  }
-}
+使用 session 時不需要 TimeTree 密碼；session 優先於帳密。過期時本機重新登入與匯入，不會自動改用帳密重試。CSRF 仍從 TimeTree 頁面讀取，缺少 CSRF 不會送出寫入。Session 交接方式參考 [第三方實作的認證文件](https://github.com/kfa-ai/hermes-timetree-sync/blob/main/docs/authentication.md)，不是官方支援的 API。
+
+### 連接 Codex App
+
+在專案目錄執行以下命令，讓 Codex 記住實際的 server 絕對路徑；命令不包含帳號密碼：
+
+```powershell
+codex mcp add timetree-private -- (Get-Command node).Source (Join-Path (Get-Location) 'dist/index.js')
 ```
 
-Restart Claude Code. `/mcp` should show `timetree` with the TimeTree tools,
-including `list_calendars`, `list_events`, `create_event`, `update_event`,
-`poster_workspace_status`, and `mark_poster_processed`.
+也可以在本機 `~/.codex/config.toml` 加入以下設定，將路徑換成實際位置：
 
-Process-level env vars still override the `.env` file, so CI / one-off
-invocations can set `TIMETREE_PASSWORD=xxx node dist/index.js` to bypass it.
-
-## Usage
-
-### Poster folder workflow
-
-Use a single poster workspace folder, defaulting to:
-
-```text
-C:\Users\daan\Desktop\timetree海報更新
+```toml
+[mcp_servers.timetree-private]
+command = "node"
+args = ['C:\path\to\TimeTree-MCP\dist\index.js']
 ```
 
-The MCP manages this structure:
+Codex App 與 CLI 共用這份 MCP 設定，見 [OpenAI 官方 MCP 文件](https://learn.chatgpt.com/docs/extend/mcp?surface=cli)。本機 `codex mcp add --help` 已確認命令格式。設定完成後重新啟動 Codex；可用 `codex mcp list` 檢查註冊。這個 server 使用自己的 TimeTree 帳號登入流程，不使用 `codex mcp login` 的 OAuth。
 
-```text
-timetree海報更新
-├─ 00_待處理
-├─ 10_已新增
-├─ 20_已更新既有事件
-├─ 90_需人工確認
-└─ _log
+沒有 credentials 時 server 仍可啟動、列出四個工具，但所有日曆呼叫會回傳驗證失敗；填好本機 `.env` 或匯入 session 後重新啟動。沒有設定日曆 ID 時，可先完成以下 discovery：
+
+1. 呼叫 `list_calendars`，從目前帳號可存取的日曆找出「共用行事曆」的 ID。
+2. 把 ID 填入本機 `.env` 的 `TIMETREE_CALENDAR_ID`，重新啟動 MCP。
+3. 先呼叫 `list_events` 確認日曆與日期範圍，再新增或更新正式事件。
+
+名稱只用於人工辨識；若有多個同名日曆，必須先確認正確 ID，程式不會任選。沒有設定有效 ID 時，只有 `list_calendars` 可用。所有事件操作只使用鎖定的 ID，不接受工具參數覆寫日曆。設定錯誤但有效的 ID 仍會操作該日曆，請先確認讀回內容。
+
+伺服器從專案根目錄載入 `.env`；既有 process 環境變數優先。匯入的 session 會保存在本機 `.env`；程式執行時的 session/CSRF 更新只存於記憶體。登入失效需本機刷新 session 並重新啟動 MCP；寫入遇到 timeout 或錯誤時不自動重送，請先讀回確認是否已建立，以免重複事件。
+
+## 工具
+
+只提供 `list_calendars`、`list_events`、`create_event`、`update_event`。不再提供公開日曆、圖片上傳或海報檔案搬移工具。
+
+- `list_calendars {}`：列出帳號可存取的有效日曆 ID 與名稱，用於第一次設定。
+- `list_events {"from":"2026-11-01","to":"2026-12-01"}`：列出鎖定日曆與 `[from,to)` 重疊的事件，回傳 `uuid` 供更新使用。會同步所有分頁後依日期篩選；遇到不完整分頁會回報錯誤。
+- `create_event {"title":"晚餐","start":"2026-11-05T18:00","end":"2026-11-05T20:00"}`：新增一般事件；未給 end 預設一小時。
+- `create_event {"title":"休假","start":"2026-11-05","end":"2026-11-06","all_day":true}`：全日日期包含 end，以上為 11/5–11/6 兩天；未給 end 為單日。
+- `update_event {"event_uuid":"從 list_events 取得的 uuid","title":"新標題"}`：先讀取原事件，再保留未指定欄位送出更新，包括附件、checklist、提醒、重複設定及未知欄位。`link_url` 只修改 attachment.url，空字串可清除連結。
+
+日期使用當地 `YYYY-MM-DD` 或 `YYYY-MM-DDTHH:mm[:ss]`，不接受尾端 Z 或 UTC offset。`timezone` 預設 `Asia/Taipei`；DST 不存在或有兩種解讀的時間會拒絕。全日事件只接受日期。更新時若變更 timezone 或 all_day，必須同時提供 start/end；只改 start 不會自動移動原 end。時間或範圍不合法會拒絕。
+
+新增與更新還可指定 `location`、`description`、`link_url`（HTTP/HTTPS）與 `label_id`（1–10）。新增預設一般事件，不預設指定出席成員；日曆其他成員仍可能看見變更或收到通知。同一 MCP 程序會循序處理同一事件的更新，避免自己的兩個更新互相覆蓋；不同事件可以並行。讀取後到寫入之間若其他成員或其他程序同時改動事件，仍有覆蓋風險；非官方 API 沒有已驗證的版本鎖定機制。
+
+## 驗證
+
+```powershell
+npm run typecheck
+npm run build
+node --test tests/private-calendar.test.mjs
+& .\tests\session-import.test.ps1
 ```
 
-Rules:
-
-1. Put new poster images in `00_待處理`.
-2. Start by calling `poster_workspace_status`; it creates missing folders and lists only pending images.
-3. When `create_event` succeeds with an `image_path` from `00_待處理`, the poster is moved to `10_已新增`.
-4. When `update_event` succeeds with an `image_path` from `00_待處理`, the poster is moved to `20_已更新既有事件`.
-5. Use `mark_poster_processed` with `status: "needs_review"` for unclear posters; they move to `90_需人工確認`.
-6. Every move appends a CSV record under `_log`.
-
-If someone drops images directly into the workspace root, `poster_workspace_status`
-moves them into `00_待處理` by default so future runs still process only new items.
-
-The intended workflow:
-
-1. Drop an event poster (image) into a Claude Code conversation.
-2. Ask Claude something like: *"請把這張海報的活動加到我的家庭共用行事曆。"*
-3. Claude reads the poster, calls `list_calendars` to find the right calendar_id,
-   writes a short description, and calls `create_event` with an ISO date.
-4. Open TimeTree on your phone — the event is there.
-
-## Tools
-
-### `list_calendars`
-
-No arguments. Returns `{calendars: [{calendar_id, name, members}], total}`.
-Use this first to know which `calendar_id` to write into.
-
-### `create_event`
-
-Required: `calendar_id` (number), `title` (string), `start` (ISO 8601 string).
-
-Optional:
-- `end` — ISO 8601. Defaults to `start + 1h` for timed events, `start` (same day) for all-day.
-- `all_day` — boolean (default `false`).
-- `timezone` — IANA timezone (default `Asia/Taipei`).
-- `location` — string.
-- `description` — short note, shows up as the event note in TimeTree.
-- `label_id` — 1-10. 1=Emerald 2=Cyan 3=Blue 4=Brown 5=Black 6=Red 7=Rose 8=Pink 9=Orange 10=Violet.
-
-Returns the created event with its `uuid` (useful if you later add `update_event` / `delete_event`).
-
-### `poster_workspace_status`
-
-Creates/checks the poster workspace folders, moves loose root-level images into
-`00_待處理` by default, and returns pending image paths.
-
-### `mark_poster_processed`
-
-Moves a poster out of `00_待處理` and writes the CSV log. This is automatic for
-successful `create_event` and `update_event` calls when `image_path` points into
-`00_待處理`, so this tool is mainly for manual corrections and `needs_review`.
-
-## Troubleshooting
-
-- **`Invalid email or password`** — TimeTree returned 401. Check the dedicated account
-  credentials. If the account uses social login (Google / Apple), it won't have an
-  email/password and this MCP can't authenticate it. Use a TimeTree account created
-  with email/password signup.
-- **`CSRF token missing or invalid`** — usually means the session expired between
-  calls. The client auto-reauths once on 403; if you see this twice in a row,
-  TimeTree may have changed the CSRF token location.
-- **Empty `list_calendars` result** — make sure the dedicated account is actually a
-  member of at least one shared calendar.
-- **Build fails on Windows with esbuild ENOENT** — known npm 10.8.x bug. Try
-  `npm install --no-package-lock` or upgrade npm to 10.9+.
-
-## Project structure
-
-```
-src/
-  index.ts      # MCP server entry (stdio transport)
-  timetree.ts   # auth + HTTP + API client + logger
-  tools.ts      # MCP tools: list_calendars, create_event
-  types.ts      # Zod schemas and TS types
-```
-
-Four files, ~700 LOC. MVP scope. Extend by adding more handlers to `buildTools` in `tools.ts`.
+測試使用 mock fetch 驗證私人 endpoint、固定 ID、更新欄位保留、日期與分頁，以及本機 MCP 握手。這些是離線驗證，不能證明真實帳號登入、權限或 TimeTree 實際寫入成功。需在本機設定帳號和日曆 ID 後，再驗證實際讀寫。獨立安全審查見 `reports/security.md`；依賴 audit 因沒有 lockfile 而回報 ENOLOCK，尚未完成。
